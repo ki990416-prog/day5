@@ -1,0 +1,37 @@
+:root { font-family: system-ui, 'Noto Sans KR', sans-serif; color: #1f2937; background: #fff7ed; }
+body { margin: 0; }
+.app { max-width: 1000px; margin: 0 auto; padding: 16px; }
+.top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
+.top h1 { margin: 0; font-size: 1.4rem; cursor: pointer; }
+nav { display: flex; gap: 6px; flex-wrap: wrap; }
+button { font: inherit; padding: 6px 12px; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; cursor: pointer; }
+button:hover { background: #f3f4f6; }
+button.on { background: #fed7aa; border-color: #fb923c; }
+button.primary { background: #ea580c; border-color: #ea580c; color: #fff; }
+button.primary:hover { background: #c2410c; }
+button.liked { border-color: #f43f5e; }
+button.link { border: none; background: none; color: #2563eb; padding: 4px 0; text-align: left; }
+button.x { border: none; background: none; color: #9ca3af; padding: 0 4px; }
+input { font: inherit; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 8px; min-width: 0; }
+input[type=number] { width: 64px; }
+.card { background: #fff; border-radius: 12px; padding: 16px; margin: 12px 0; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+.card h2 { margin-top: 0; font-size: 1.1rem; }
+.auth { max-width: 360px; display: flex; flex-direction: column; gap: 8px; margin: 24px auto; }
+.grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); margin-top: 12px; }
+.product { background: #fff; border-radius: 14px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.1); display: flex; flex-direction: column; gap: 6px; }
+.product h3 { margin: 0; }
+.emoji { font-size: 2.6rem; }
+.desc { margin: 0; font-size: .85rem; color: #6b7280; }
+.price { margin: 0; font-weight: 700; color: #ea580c; }
+.row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.sum { font-size: .85rem; color: #6b7280; }
+.comments { border-top: 1px solid #e5e7eb; padding-top: 6px; font-size: .85rem; }
+.comments p { margin: 4px 0; }
+.line { display: flex; gap: 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid #f3f4f6; flex-wrap: wrap; }
+.line > span:first-child { flex: 1; min-width: 120px; }
+.total { font-weight: 700; text-align: right; }
+.badge { font-size: .75rem; padding: 2px 8px; border-radius: 999px; background: #dcfce7; vertical-align: middle; }
+.badge.returned { background: #fee2e2; }
+.muted { color: #6b7280; font-size: .85rem; }
+.error { color: #b91c1c; cursor: pointer; }
+footer { text-align: center; color: #9ca3af; font-size: .8rem; margin-top: 24px; }

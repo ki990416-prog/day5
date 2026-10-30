@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>제주 건물 부수기</title>
+<style>
+  html,body{margin:0;height:100%;background:#16202a;color:#fff;font-family:"Malgun Gothic",sans-serif;overflow:hidden;touch-action:none;user-select:none}
+  #wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%}
+  canvas{width:min(100vw,calc((100vh - 8px) * 4 / 3));aspect-ratio:4/3;background:#000;display:block;image-rendering:auto}
+  #pad{display:none;width:100%;max-width:800px;justify-content:space-between;padding:8px 16px;box-sizing:border-box;gap:12px}
+  #pad button{flex:1;height:64px;font-size:28px;border:0;border-radius:16px;background:#ffffff33;color:#fff;touch-action:none}
+  #pad button:active{background:#ffffff66}
+  @media (pointer:coarse){#pad{display:flex}canvas{width:min(100vw,calc((100vh - 90px) * 4 / 3))}}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c" width="800" height="600"></canvas>
+  <div id="pad">
+    <button id="bL">◀</button>
+    <button id="bR">▶</button>
+    <button id="bJ">점프</button>
+    <button id="bA">칼</button>
+    <button id="bD">튕기기</button>
+  </div>
+</div>
+<script src="game.js"></script>
+</body>
+</html>
