@@ -4,13 +4,15 @@ import Auth from './components/Auth'
 import ProductCard from './components/ProductCard'
 import Cart from './components/Cart'
 import Orders from './components/Orders'
+import Guestbook from './components/Guestbook'
 
 export default function App() {
   const [user, setUser] = useState(null)
   const [tab, setTab] = useState('shop')
   const [products, setProducts] = useState([])
-  const [likes, setLikes] = useState([])
+  const [posts, setPosts] = useState([])
   const [comments, setComments] = useState([])
+  const [likes, setLikes] = useState([])
   const [cart, setCart] = useState([])
   const [orders, setOrders] = useState([])
   const [error, setError] = useState('')
@@ -27,15 +29,17 @@ export default function App() {
   }, [])
 
   const loadPublic = useCallback(async () => {
-    const [p, l, c] = await Promise.all([
+    const [p, g, c, l] = await Promise.all([
       supabase.from('products').select('*').order('id'),
-      supabase.from('likes').select('*'),
-      supabase.from('comments').select('*').order('created_at'),
+      supabase.from('guestbook_posts').select('*').order('created_at', { ascending: false }),
+      supabase.from('guestbook_comments').select('*').order('created_at'),
+      supabase.from('guestbook_likes').select('*'),
     ])
     check(p)
     setProducts(p.data ?? [])
-    setLikes(l.data ?? [])
+    setPosts(g.data ?? [])
     setComments(c.data ?? [])
+    setLikes(l.data ?? [])
   }, [])
 
   const loadMine = useCallback(async () => {
@@ -46,7 +50,7 @@ export default function App() {
     }
     const [c, o] = await Promise.all([
       supabase.from('cart_items').select('*, products(*)').order('id'),
-      supabase.from('orders').select('*, order_items(*, products(name, emoji))').order('id', { ascending: false }),
+      supabase.from('orders').select('*').order('id', { ascending: false }),
     ])
     setCart(c.data ?? [])
     setOrders(o.data ?? [])
@@ -63,35 +67,16 @@ export default function App() {
     setTab('auth')
     setError('로그인이 필요합니다.')
   }
+  const authorName = () => user.email.split('@')[0]
 
-  async function toggleLike(productId, liked) {
-    if (!user) return needLogin()
-    const q = supabase.from('likes')
-    check(
-      liked
-        ? await q.delete().match({ user_id: user.id, product_id: productId })
-        : await q.insert({ user_id: user.id, product_id: productId }),
-    )
-    loadPublic()
-  }
-
-  async function addComment(productId, content) {
-    check(await supabase.from('comments').insert({ product_id: productId, user_id: user.id, author_email: user.email, content }))
-    loadPublic()
-  }
-
-  async function deleteComment(id) {
-    check(await supabase.from('comments').delete().eq('id', id))
-    loadPublic()
-  }
-
+  // ---- 장바구니 ----
   async function addToCart(product, qty) {
     if (!user) return needLogin()
     const existing = cart.find((c) => c.product_id === product.id)
     check(
       existing
         ? await supabase.from('cart_items').update({ quantity: existing.quantity + qty }).eq('id', existing.id)
-        : await supabase.from('cart_items').insert({ user_id: user.id, product_id: product.id, quantity: qty }),
+        : await supabase.from('cart_items').insert({ product_id: product.id, quantity: qty }),
     )
     loadMine()
   }
@@ -106,56 +91,32 @@ export default function App() {
     loadMine()
   }
 
-  // items: [{ product_id, quantity, unit_price }]  → 합계(수량 x 가격)를 계산해 DB에 저장
-  async function createOrder(items) {
-    const address = window.prompt('배송지를 입력해 주세요')
-    if (!address?.trim()) return false
-    const total = items.reduce((s, i) => s + i.quantity * i.unit_price, 0)
-    const { data: order, error: e1 } = await supabase
-      .from('orders')
-      .insert({ user_id: user.id, address: address.trim(), total_price: total })
-      .select()
-      .single()
-    if (e1) {
-      setError(e1.message)
-      return false
-    }
-    const { error: e2 } = await supabase.from('order_items').insert(items.map((i) => ({ ...i, order_id: order.id })))
-    if (e2) {
-      setError(e2.message)
-      return false
-    }
-    return true
-  }
+  // ---- 주문 (total_price = 단가 x 수량은 DB가 계산) ----
+  const orderRow = (product, quantity) => ({
+    product_id: product.id,
+    product_name: product.name,
+    unit_price: product.price,
+    quantity,
+  })
 
   async function buyNow(product, qty) {
     if (!user) return needLogin()
-    if (await createOrder([{ product_id: product.id, quantity: qty, unit_price: product.price }])) {
-      await loadMine()
-      setTab('orders')
-    }
+    const { error: e } = await supabase.from('orders').insert(orderRow(product, qty))
+    if (e) return setError(e.message)
+    await loadMine()
+    setTab('orders')
   }
 
   async function checkout() {
-    const ok = await createOrder(
-      cart.map((c) => ({ product_id: c.product_id, quantity: c.quantity, unit_price: c.products.price })),
-    )
-    if (ok) {
-      check(await supabase.from('cart_items').delete().eq('user_id', user.id))
-      await loadMine()
-      setTab('orders')
-    }
+    const { error: e } = await supabase.from('orders').insert(cart.map((c) => orderRow(c.products, c.quantity)))
+    if (e) return setError(e.message)
+    check(await supabase.from('cart_items').delete().eq('user_id', user.id))
+    await loadMine()
+    setTab('orders')
   }
 
-  async function editOrderQty(itemId, quantity) {
-    check(await supabase.from('order_items').update({ quantity }).eq('id', itemId))
-    loadMine()
-  }
-
-  async function editAddress(order) {
-    const address = window.prompt('새 배송지', order.address)
-    if (!address?.trim()) return
-    check(await supabase.from('orders').update({ address: address.trim() }).eq('id', order.id))
+  async function editOrderQty(id, quantity) {
+    check(await supabase.from('orders').update({ quantity }).eq('id', id))
     loadMine()
   }
 
@@ -163,6 +124,38 @@ export default function App() {
     if (!window.confirm('이 주문을 반환할까요?')) return
     check(await supabase.from('orders').update({ status: 'returned' }).eq('id', id))
     loadMine()
+  }
+
+  // ---- 방명록 ----
+  async function addPost(content) {
+    check(await supabase.from('guestbook_posts').insert({ author: authorName(), content }))
+    loadPublic()
+  }
+
+  async function deletePost(id) {
+    check(await supabase.from('guestbook_posts').delete().eq('id', id))
+    loadPublic()
+  }
+
+  async function addComment(postId, content) {
+    check(await supabase.from('guestbook_comments').insert({ post_id: postId, author: authorName(), content }))
+    loadPublic()
+  }
+
+  async function deleteComment(id) {
+    check(await supabase.from('guestbook_comments').delete().eq('id', id))
+    loadPublic()
+  }
+
+  async function toggleLike(postId, liked) {
+    if (!user) return needLogin()
+    const q = supabase.from('guestbook_likes')
+    check(
+      liked
+        ? await q.delete().match({ user_id: user.id, post_id: postId })
+        : await q.insert({ post_id: postId }),
+    )
+    loadPublic()
   }
 
   if (!hasSupabaseEnv) {
@@ -176,6 +169,7 @@ export default function App() {
   }
 
   const cartCount = cart.reduce((s, c) => s + c.quantity, 0)
+  const guarded = (t) => () => (user ? setTab(t) : needLogin())
 
   return (
     <div className="app">
@@ -183,10 +177,11 @@ export default function App() {
         <h1 onClick={() => setTab('shop')}>🍊 제주 특산물 마켓</h1>
         <nav>
           <button className={tab === 'shop' ? 'on' : ''} onClick={() => setTab('shop')}>상품</button>
-          <button className={tab === 'cart' ? 'on' : ''} onClick={() => (user ? setTab('cart') : needLogin())}>
+          <button className={tab === 'guestbook' ? 'on' : ''} onClick={() => setTab('guestbook')}>방명록</button>
+          <button className={tab === 'cart' ? 'on' : ''} onClick={guarded('cart')}>
             장바구니 {cartCount > 0 && `(${cartCount})`}
           </button>
-          <button className={tab === 'orders' ? 'on' : ''} onClick={() => (user ? setTab('orders') : needLogin())}>주문내역</button>
+          <button className={tab === 'orders' ? 'on' : ''} onClick={guarded('orders')}>주문내역</button>
           {user ? (
             <button onClick={() => supabase.auth.signOut().then(() => setTab('shop'))}>로그아웃</button>
           ) : (
@@ -202,26 +197,25 @@ export default function App() {
       {tab === 'shop' && (
         <section className="grid">
           {products.map((p) => (
-            <ProductCard
-              key={p.id}
-              product={p}
-              user={user}
-              likeCount={likes.filter((l) => l.product_id === p.id).length}
-              liked={likes.some((l) => l.product_id === p.id && l.user_id === user?.id)}
-              comments={comments.filter((c) => c.product_id === p.id)}
-              onLike={toggleLike}
-              onAddCart={addToCart}
-              onBuy={buyNow}
-              onComment={addComment}
-              onDeleteComment={deleteComment}
-            />
+            <ProductCard key={p.id} product={p} onAddCart={addToCart} onBuy={buyNow} />
           ))}
         </section>
       )}
-      {tab === 'cart' && user && <Cart items={cart} onChangeQty={changeCartQty} onRemove={removeCart} onCheckout={checkout} />}
-      {tab === 'orders' && user && (
-        <Orders orders={orders} onEditQty={editOrderQty} onEditAddress={editAddress} onReturn={returnOrder} />
+      {tab === 'guestbook' && (
+        <Guestbook
+          user={user}
+          posts={posts}
+          comments={comments}
+          likes={likes}
+          onPost={addPost}
+          onDeletePost={deletePost}
+          onLike={toggleLike}
+          onAddComment={addComment}
+          onDeleteComment={deleteComment}
+        />
       )}
+      {tab === 'cart' && user && <Cart items={cart} onChangeQty={changeCartQty} onRemove={removeCart} onCheckout={checkout} />}
+      {tab === 'orders' && user && <Orders orders={orders} onEditQty={editOrderQty} onReturn={returnOrder} />}
 
       <footer>제주 특산물 마켓 · 학습용 프로젝트</footer>
     </div>

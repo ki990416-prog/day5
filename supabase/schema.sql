@@ -1,115 +1,93 @@
--- 제주 특산물 쇼핑몰 스키마 (Supabase SQL Editor에서 한 번에 실행)
-
 -- 1. 상품
 create table if not exists products (
   id          bigint generated always as identity primary key,
-  name        text not null,
-  emoji       text not null default '🍊',
+  name        text    not null,
   description text,
-  price       integer not null check (price >= 0),
-  created_at  timestamptz not null default now()
+  emoji       text,
+  price       integer not null check (price > 0),
+  created_at  timestamptz default now()
 );
 
--- 2. 장바구니 (회원당 상품 1행, 수량만 증감)
+-- 2. 장바구니
 create table if not exists cart_items (
   id         bigint generated always as identity primary key,
-  user_id    uuid not null references auth.users(id) on delete cascade,
+  user_id    uuid   not null default auth.uid() references auth.users(id) on delete cascade,
   product_id bigint not null references products(id) on delete cascade,
-  quantity   integer not null check (quantity > 0),
+  quantity   integer not null default 1 check (quantity > 0),
   unique (user_id, product_id)
 );
 
--- 3. 주문 (status: ordered 주문완료 / returned 반환)
+-- 3. 주문 (total_price = 수량 x 단가, DB가 자동 계산)
 create table if not exists orders (
-  id          bigint generated always as identity primary key,
-  user_id     uuid not null references auth.users(id) on delete cascade,
-  address     text not null,
-  total_price integer not null default 0,
-  status      text not null default 'ordered' check (status in ('ordered','returned')),
-  created_at  timestamptz not null default now()
-);
-
--- 4. 주문 상품 (total_price = 수량 x 단가, DB가 자동 계산)
-create table if not exists order_items (
-  id          bigint generated always as identity primary key,
-  order_id    bigint not null references orders(id) on delete cascade,
-  product_id  bigint not null references products(id),
-  quantity    integer not null check (quantity > 0),
-  unit_price  integer not null check (unit_price >= 0),
-  total_price integer generated always as (quantity * unit_price) stored
-);
-
--- 5. 좋아요
-create table if not exists likes (
-  user_id    uuid not null references auth.users(id) on delete cascade,
-  product_id bigint not null references products(id) on delete cascade,
-  created_at timestamptz not null default now(),
-  primary key (user_id, product_id)
-);
-
--- 6. 방명록 댓글
-create table if not exists comments (
   id           bigint generated always as identity primary key,
-  product_id   bigint not null references products(id) on delete cascade,
-  user_id      uuid not null references auth.users(id) on delete cascade,
-  author_email text not null,
-  content      text not null check (char_length(content) between 1 and 500),
-  created_at   timestamptz not null default now()
+  user_id      uuid   not null default auth.uid() references auth.users(id) on delete cascade,
+  product_id   bigint references products(id) on delete set null,
+  product_name text    not null,
+  unit_price   integer not null,
+  quantity     integer not null check (quantity > 0),
+  total_price  integer generated always as (unit_price * quantity) stored,
+  status       text    not null default 'ordered' check (status in ('ordered', 'returned')),
+  created_at   timestamptz default now()
 );
 
--- 주문 상품이 바뀌면 주문 합계(orders.total_price)를 다시 계산
-create or replace function recalc_order_total() returns trigger
-language plpgsql security definer as $$
-declare oid bigint := coalesce(new.order_id, old.order_id);
-begin
-  update orders
-     set total_price = coalesce((select sum(total_price) from order_items where order_id = oid), 0)
-   where id = oid;
-  return null;
-end $$;
+-- 4. 방명록 / 댓글 / 좋아요
+create table if not exists guestbook_posts (
+  id         bigint generated always as identity primary key,
+  user_id    uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  author     text not null,
+  content    text not null,
+  created_at timestamptz default now()
+);
 
-drop trigger if exists trg_recalc_order_total on order_items;
-create trigger trg_recalc_order_total
-after insert or update or delete on order_items
-for each row execute function recalc_order_total();
+create table if not exists guestbook_comments (
+  id         bigint generated always as identity primary key,
+  post_id    bigint not null references guestbook_posts(id) on delete cascade,
+  user_id    uuid   not null default auth.uid() references auth.users(id) on delete cascade,
+  author     text   not null,
+  content    text   not null,
+  created_at timestamptz default now()
+);
 
--- RLS
-alter table products    enable row level security;
-alter table cart_items  enable row level security;
-alter table orders      enable row level security;
-alter table order_items enable row level security;
-alter table likes       enable row level security;
-alter table comments    enable row level security;
+create table if not exists guestbook_likes (
+  post_id bigint not null references guestbook_posts(id) on delete cascade,
+  user_id uuid   not null default auth.uid() references auth.users(id) on delete cascade,
+  primary key (post_id, user_id)
+);
 
-create policy "products_read" on products for select using (true);
+-- 5. RLS (행 단위 보안)
+alter table products            enable row level security;
+alter table cart_items          enable row level security;
+alter table orders              enable row level security;
+alter table guestbook_posts     enable row level security;
+alter table guestbook_comments  enable row level security;
+alter table guestbook_likes     enable row level security;
 
-create policy "cart_own" on cart_items for all
-  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "products read" on products for select using (true);
 
-create policy "orders_own" on orders for all
-  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "cart own"   on cart_items for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "orders own" on orders     for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
-create policy "order_items_own" on order_items for all
-  using (exists (select 1 from orders o where o.id = order_id and o.user_id = auth.uid()))
-  with check (exists (select 1 from orders o where o.id = order_id and o.user_id = auth.uid()));
+create policy "posts read"   on guestbook_posts for select using (true);
+create policy "posts insert" on guestbook_posts for insert with check (auth.uid() = user_id);
+create policy "posts delete" on guestbook_posts for delete using (auth.uid() = user_id);
 
-create policy "likes_read"  on likes for select using (true);
-create policy "likes_write" on likes for insert with check (auth.uid() = user_id);
-create policy "likes_del"   on likes for delete using (auth.uid() = user_id);
+create policy "comments read"   on guestbook_comments for select using (true);
+create policy "comments insert" on guestbook_comments for insert with check (auth.uid() = user_id);
+create policy "comments delete" on guestbook_comments for delete using (auth.uid() = user_id);
 
-create policy "comments_read"  on comments for select using (true);
-create policy "comments_write" on comments for insert with check (auth.uid() = user_id);
-create policy "comments_del"   on comments for delete using (auth.uid() = user_id);
+create policy "likes read"   on guestbook_likes for select using (true);
+create policy "likes insert" on guestbook_likes for insert with check (auth.uid() = user_id);
+create policy "likes delete" on guestbook_likes for delete using (auth.uid() = user_id);
 
--- 상품 시드 (가격은 임의 설정)
-insert into products (name, emoji, description, price) values
- ('한라봉',          '🍊', '새콤달콤한 제주 한라봉 3kg',            23800),
- ('감귤',            '🍊', '당도 높은 노지 감귤 5kg',               14500),
- ('천혜향',          '🍊', '향이 진한 천혜향 2kg',                   27900),
- ('흑돼지 오겹살',   '🐖', '제주 흑돼지 오겹살 500g (냉동)',         19800),
- ('제주 갈치',       '🐟', '은갈치 3마리 세트',                      38600),
- ('옥돔',            '🐠', '손질 옥돔 3미',                          45200),
- ('말린 전복',       '🐚', '제주 말린 전복 200g',                    52300),
- ('제주 녹차',       '🍵', '햇녹차 티백 20입',                       11700),
- ('감귤 초콜릿',     '🍫', '감귤 칩이 들어간 초콜릿 3박스',           9900),
- ('우도 땅콩 막걸리','🥜', '우도 땅콩을 넣은 막걸리 4병',            16400);
+-- 6. 상품 샘플 데이터 (가격은 임의 설정)
+insert into products (name, description, emoji, price) values
+  ('한라봉 3kg',         '달콤새콤 제주 한라봉 선물세트',     '🍊', 28700),
+  ('천혜향 2kg',         '향이 진한 프리미엄 천혜향',         '🍊', 34300),
+  ('흑돼지 오겹살 600g', '쫄깃고소한 제주 흑돼지 구이용',     '🐖', 31900),
+  ('옥돔 3마리',         '제주 바다에서 잡은 손질 옥돔',      '🐟', 45200),
+  ('갈치 2마리',         '은빛 제주 은갈치 (대)',             '🐟', 39800),
+  ('제주 감귤 초콜릿',   '감귤 풍미 가득한 수제 초콜릿',      '🍫', 12600),
+  ('오메기떡 10개입',    '쫀득한 제주 전통 오메기떡',         '🍡', 17400),
+  ('우도 땅콩 막걸리',   '우도 땅콩으로 빚은 고소한 막걸리',  '🍶',  9300),
+  ('제주 말차 세트',     '제주 오설록 스타일 말차 티백 세트', '🍵', 21500),
+  ('성게 미역국 세트',   '제주 성게알이 듬뿍 든 간편 미역국', '🥣', 24900);
